@@ -1,5 +1,8 @@
 #include "img_filter.h"
 
+std::vector<Rect> faces(10);
+std::vector<Rect> tmpfaces(10);
+QMutex mutex;
 
 //复古图（滤镜）
 Mat VintageColor(Mat srcImage)
@@ -168,6 +171,113 @@ Mat Enlarge(Mat srcImage)
     return dstImage;
 }
 
+//人脸检测
+void FaceDetection(Mat srcImage)
+{
+    //mutex.lock();
+	Mat grayImage;
+    std::vector<Rect> tmpfaces;
+    String facecascade_name = "haarcascade_frontalface_alt.xml";
+    CascadeClassifier facecascade;
+    if (!facecascade.load(facecascade_name))
+    {
+        std::cout << "haarcascade_frontalface_alt不能加载" << std::endl;
+        //return srcImage;
+        return;
+    }
+    cvtColor(srcImage, grayImage, COLOR_RGB2GRAY);
+    facecascade.detectMultiScale(grayImage, tmpfaces, 1.3, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(0, 0));
+
+    mutex.lock();
+    faces.clear();
+    faces.assign(tmpfaces.begin(), tmpfaces.end());
+    mutex.unlock();
+}
+
+Mat DrawRec(Mat srcImg, int count)
+{
+    static std::vector<Rect> tmpfaces;
+    //if(count == 2)
+    //{
+        mutex.lock();
+        tmpfaces.clear();
+        if(!faces.empty())
+            tmpfaces.assign(faces.begin(), faces.end());
+        else
+            tmpfaces.clear();
+        mutex.unlock();
+    //}
+    //tmpfaces = faces;
+    for (size_t i = 0; i < tmpfaces.size(); i++)
+    {
+        rectangle(srcImg, Point(tmpfaces[i].x, tmpfaces[i].y), Point(tmpfaces[i].x + tmpfaces[i].width, tmpfaces[i].y + tmpfaces[i].height),Scalar(0,0,225),3,4,0);
+    }
+    //return srcImage;
+    //mutex.unlock();
+    return srcImg;
+}
+
+// 加帽子
+void MapToHead(Mat &hat, Mat &srcImage, int x, int y)
+{
+    if (hat.channels() != 4)
+    {
+        cout << "通道不为4" << endl;
+        return;
+    }
+    for (int i = 0; i < hat.rows; i++)
+    {
+        const uchar *P = hat.ptr<uchar>(i);
+        uchar* head = NULL;
+        //j指向帽子，h指向头
+        for (int j = 0, h = 0; (j < hat.cols) && (h < srcImage.cols); ++j, ++h)
+        {
+            int alpha = P[4 * j + 3];
+            if (alpha != 0)
+            {
+                if ((i + y >= 0) && (i + y < srcImage.rows) && (x + h >= 0) && (x + h < srcImage.cols))
+                {
+                    head = srcImage.ptr<uchar>(i + y);
+                    head[3 * (x + h)] = P[4 * j];
+                    head[3 * (x + h) + 1] = P[4 * j + 1];
+                    head[3 * (x + h) + 2] = P[4 * j + 2];
+                }
+            }
+        }
+    }
+}
+// 识别人脸为了加帽子
+Mat detectFace(Mat srcImage)
+{
+    vector<Rect> faces;
+    Mat grayImage;
+    Mat hat;
+
+    String facecascade_name = "haarcascade_frontalface_alt_hat.xml";
+    CascadeClassifier face_cascade;
+    if (!face_cascade.load(facecascade_name))
+    {
+        std::cout << "haarcascade_frontalface_alt_hat不能加载" << std::endl;
+        return srcImage;
+    }
+
+    hat = imread("hat.png", -1);
+    if (!hat.data)
+    {
+        cout << "hat 不能打开" << endl;
+    }
+    cvtColor(srcImage, grayImage, COLOR_BGR2GRAY);
+
+    //人脸检测函数
+    face_cascade.detectMultiScale(grayImage, faces, 1.1, 2, 0|CV_HAAR_SCALE_IMAGE,Size(30,30));
+    for (size_t i = 0; i < faces.size(); i++)
+    {
+        resize(hat, hat, Size(faces[i].width, faces[i].height), 0, 0, INTER_LANCZOS4);
+        MapToHead(hat, srcImage, faces[i].x, faces[i].y - 1.0*faces[i].height);
+    }
+    //imshow("Christmas hat", srcImage);
+    return srcImage;
+}
 /*
 int main()
 {
